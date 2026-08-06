@@ -1,0 +1,6 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE TABLE IF NOT EXISTS companies (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE, email text NOT NULL, password_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(company_id,email));
+CREATE TABLE IF NOT EXISTS ai_tools (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE, name text NOT NULL, description text NOT NULL, department text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS risk_evaluation_logs (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), company_id uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE, tool_id uuid REFERENCES ai_tools(id) ON DELETE SET NULL, description text NOT NULL, risk_level text NOT NULL CHECK (risk_level IN ('Riesgo Inaceptable','Alto Riesgo','Riesgo Limitado','Riesgo Mínimo')), provider text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), retained_until timestamptz NOT NULL DEFAULT (now() + interval '6 months'));
+REVOKE UPDATE, DELETE ON risk_evaluation_logs FROM PUBLIC;

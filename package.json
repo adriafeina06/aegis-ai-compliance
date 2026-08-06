@@ -1,0 +1,1 @@
+{"name":"aegis-ai-compliance","private":true,"workspaces":["apps/*"],"scripts":{"dev":"npm run dev --workspace apps/api","test":"npm test --workspace apps/api","typecheck":"npm run typecheck --workspace apps/api","lint":"npm run lint --workspace apps/api","migrate":"npm run migrate --workspace apps/api"},"devDependencies":{"typescript":"^5.6.3"}}

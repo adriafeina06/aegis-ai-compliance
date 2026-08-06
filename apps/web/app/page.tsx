@@ -1,0 +1,1 @@
+export default function Home(){return <main style={{fontFamily:'sans-serif',maxWidth:800,margin:'5rem auto',padding:24}}><h1>Aegis AI Compliance</h1><p>Inventario y clasificación de riesgos del EU AI Act para tu empresa.</p><p>API disponible en <code>/health</code>. Configura NEXT_PUBLIC_API_URL para conectar el panel.</p></main>}

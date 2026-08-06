@@ -1,0 +1,2 @@
+import {describe,it,expect} from 'vitest'; import request from 'supertest'; import {app} from '../src/server';
+describe('API',()=>{it('health',async()=>expect((await request(app).get('/health')).body).toEqual({ok:true}));it('rejects unauthenticated tools',async()=>expect((await request(app).get('/tools')).status).toBe(401));it('validates classify auth',async()=>expect((await request(app).post('/classify').send({description:'x'})).status).toBe(401))});
