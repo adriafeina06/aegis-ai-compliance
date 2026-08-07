@@ -2,8 +2,16 @@
 Scaffolding monorepo: Next.js + Express/TypeScript + PostgreSQL.
 
 ## Inicio
-`cp .env.example .env && docker compose up -d && npm install && npm run migrate`
-En terminales separadas: `npm run dev --workspace apps/api` y `npm run dev --workspace apps/web`.
+```bash
+cp .env.example .env
+npm install
+docker compose up -d
+npm run migrate
+npm run dev --workspace apps/api # terminal 1
+npm run dev --workspace apps/web # terminal 2
+```
+PostgreSQL queda disponible en `localhost:5432` y la variable `DATABASE_URL` debe apuntar a `postgres://aegis:aegis@localhost:5432/aegis`. Para detenerlo: `docker compose down` (borra también el volumen con `docker compose down -v`).
+La web usa `NEXT_PUBLIC_API_URL` (por defecto `http://localhost:4000`) y el API permite ese origen mediante `WEB_ORIGIN`. No guardes tokens en cookies o logs: el panel los mantiene únicamente en `sessionStorage` y los elimina al cerrar sesión.
 
 ### API
 - `POST /auth/register` `{email,password (12+),companyName}`; `POST /auth/login`
