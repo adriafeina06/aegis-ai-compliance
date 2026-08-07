@@ -5,3 +5,5 @@ services:
     ports: ["5432:5432"]
     volumes: ["aegis_pg:/var/lib/postgresql/data"]
 volumes: {aegis_pg: {}}
+
+# API connection from the host: DATABASE_URL=postgres://aegis:aegis@localhost:5432/aegis

@@ -1,11 +1,42 @@
-import 'dotenv/config'; import express from 'express'; import {z} from 'zod'; import {pool} from './db'; import {auth,AuthRequest,hashPassword,verifyPassword,sign} from './auth'; import {classify} from './llm';
-export const app=express(); app.use(express.json({limit:'32kb'}));
-const creds=z.object({email:z.string().email().max(254),password:z.string().min(12).max(128),companyName:z.string().trim().min(2).max(200).optional()}); const tool=z.object({name:z.string().trim().min(1).max(200),description:z.string().trim().min(1).max(5000),department:z.string().trim().min(1).max(120)}); const desc=z.object({description:z.string().trim().min(1).max(5000),toolId:z.string().uuid().optional()});
-app.get('/health',(_,res)=>res.json({ok:true}));
-app.post('/auth/register',async(req,res)=>{const p=creds.safeParse(req.body);if(!p.success)return res.status(400).json({error:'Datos inválidos'});try{const c=await pool.query('INSERT INTO companies(name) VALUES($1) RETURNING id', [p.data.companyName||'Empresa']);const h=await hashPassword(p.data.password);const u=await pool.query('INSERT INTO users(company_id,email,password_hash) VALUES($1,$2,$3) RETURNING id,company_id,email',[c.rows[0].id,p.data.email.toLowerCase(),h]);return res.status(201).json({token:sign(u.rows[0].id,u.rows[0].company_id),user:{id:u.rows[0].id,email:u.rows[0].email}})}catch(e:any){return res.status(e.code==='23505'?409:500).json({error:e.code==='23505'?'Email ya registrado':'Error interno'})}});
-app.post('/auth/login',async(req,res)=>{const p=creds.pick({email:true,password:true}).safeParse(req.body);if(!p.success)return res.status(400).json({error:'Datos inválidos'});const r=await pool.query('SELECT id,company_id,email,password_hash FROM users WHERE email=$1',[p.data.email.toLowerCase()]);if(!r.rowCount||!(await verifyPassword(p.data.password,r.rows[0].password_hash)))return res.status(401).json({error:'Credenciales inválidas'});res.json({token:sign(r.rows[0].id,r.rows[0].company_id),user:{id:r.rows[0].id,email:r.rows[0].email}})});
-app.use('/tools',auth); app.get('/tools',async(req:AuthRequest,res)=>{const r=await pool.query('SELECT * FROM ai_tools WHERE company_id=$1 ORDER BY created_at DESC',[req.user!.companyId]);res.json(r.rows)}); app.post('/tools',async(req:AuthRequest,res)=>{const p=tool.safeParse(req.body);if(!p.success)return res.status(400).json({error:'Datos inválidos'});const r=await pool.query('INSERT INTO ai_tools(company_id,name,description,department) VALUES($1,$2,$3,$4) RETURNING *',[req.user!.companyId,p.data.name,p.data.description,p.data.department]);res.status(201).json(r.rows[0])});
-app.patch('/tools/:id',async(req:AuthRequest,res)=>{const p=tool.partial().safeParse(req.body);if(!p.success)return res.status(400).json({error:'Datos inválidos'});const keys=Object.keys(p.data);if(!keys.length)return res.status(400).json({error:'Sin cambios'});const vals=keys.map((k)=>p.data[k as keyof typeof p.data]);const set=keys.map((k,i)=>`${k}=$${i+2}`).join(',');const r=await pool.query(`UPDATE ai_tools SET ${set},updated_at=now() WHERE id=$1 AND company_id=$${vals.length+2} RETURNING *`,[req.params.id,...vals,req.user!.companyId]);if(!r.rowCount)return res.status(404).json({error:'No encontrado'});res.json(r.rows[0])});
-app.delete('/tools/:id',async(req:AuthRequest,res)=>{const r=await pool.query('DELETE FROM ai_tools WHERE id=$1 AND company_id=$2 RETURNING id',[req.params.id,req.user!.companyId]);if(!r.rowCount)return res.status(404).json({error:'No encontrado'});res.status(204).end()});
-app.post('/classify',auth,async(req:AuthRequest,res)=>{const p=desc.safeParse(req.body);if(!p.success)return res.status(400).json({error:'Descripción inválida'});const result=await classify(p.data.description);await pool.query('INSERT INTO risk_evaluation_logs(company_id,tool_id,description,risk_level,provider) VALUES($1,$2,$3,$4,$5)',[req.user!.companyId,p.data.toolId||null,p.data.description,result.riskLevel,result.provider]);res.json({riskLevel:result.riskLevel})});
-if(require.main===module)app.listen(Number(process.env.PORT)||4000,()=>console.log('API listening'));
+import 'dotenv/config';
+import express from 'express';
+import { z } from 'zod';
+import { pool } from './db';
+import { auth, AuthRequest, hashPassword, verifyPassword, sign } from './auth';
+import { classify } from './llm';
+
+export const app = express();
+const webOrigin = process.env.WEB_ORIGIN || 'http://localhost:3000';
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', webOrigin);
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+app.use(express.json({ limit: '32kb' }));
+
+const creds = z.object({ email: z.string().email().max(254), password: z.string().min(12).max(128), companyName: z.string().trim().min(2).max(200).optional() });
+const tool = z.object({ name: z.string().trim().min(1).max(200), description: z.string().trim().min(1).max(5000), department: z.string().trim().min(1).max(120) });
+const desc = z.object({ description: z.string().trim().min(1).max(5000), toolId: z.string().uuid().optional() });
+app.get('/health', (_, res) => res.json({ ok: true }));
+
+app.post('/auth/register', async (req, res) => {
+  const p = creds.safeParse(req.body); if (!p.success) return res.status(400).json({ error: 'Datos inválidos' });
+  try { const c = await pool.query('INSERT INTO companies(name) VALUES($1) RETURNING id', [p.data.companyName || 'Empresa']); const h = await hashPassword(p.data.password);
+    const u = await pool.query('INSERT INTO users(company_id,email,password_hash) VALUES($1,$2,$3) RETURNING id,company_id,email', [c.rows[0].id, p.data.email.toLowerCase(), h]);
+    return res.status(201).json({ token: sign(u.rows[0].id, u.rows[0].company_id), user: { id: u.rows[0].id, email: u.rows[0].email } });
+  } catch (e: any) { return res.status(e.code === '23505' ? 409 : 500).json({ error: e.code === '23505' ? 'Email ya registrado' : 'Error interno' }); }
+});
+app.post('/auth/login', async (req, res) => { const p = creds.pick({ email: true, password: true }).safeParse(req.body); if (!p.success) return res.status(400).json({ error: 'Datos inválidos' });
+  const r = await pool.query('SELECT id,company_id,email,password_hash FROM users WHERE email=$1', [p.data.email.toLowerCase()]);
+  if (!r.rowCount || !(await verifyPassword(p.data.password, r.rows[0].password_hash))) return res.status(401).json({ error: 'Credenciales inválidas' });
+  res.json({ token: sign(r.rows[0].id, r.rows[0].company_id), user: { id: r.rows[0].id, email: r.rows[0].email } });
+});
+app.use('/tools', auth);
+app.get('/tools', async (req: AuthRequest, res) => { const r = await pool.query('SELECT * FROM ai_tools WHERE company_id=$1 ORDER BY created_at DESC', [req.user!.companyId]); res.json(r.rows); });
+app.post('/tools', async (req: AuthRequest, res) => { const p = tool.safeParse(req.body); if (!p.success) return res.status(400).json({ error: 'Datos inválidos' }); const r = await pool.query('INSERT INTO ai_tools(company_id,name,description,department) VALUES($1,$2,$3,$4) RETURNING *', [req.user!.companyId, p.data.name, p.data.description, p.data.department]); res.status(201).json(r.rows[0]); });
+app.patch('/tools/:id', async (req: AuthRequest, res) => { const p = tool.partial().safeParse(req.body); if (!p.success) return res.status(400).json({ error: 'Datos inválidos' }); const keys = Object.keys(p.data); if (!keys.length) return res.status(400).json({ error: 'Sin cambios' }); const vals = keys.map(k => p.data[k as keyof typeof p.data]); const set = keys.map((k, i) => `${k}=$${i + 2}`).join(','); const r = await pool.query(`UPDATE ai_tools SET ${set},updated_at=now() WHERE id=$1 AND company_id=$${vals.length + 2} RETURNING *`, [req.params.id, ...vals, req.user!.companyId]); if (!r.rowCount) return res.status(404).json({ error: 'No encontrado' }); res.json(r.rows[0]); });
+app.delete('/tools/:id', async (req: AuthRequest, res) => { const r = await pool.query('DELETE FROM ai_tools WHERE id=$1 AND company_id=$2 RETURNING id', [req.params.id, req.user!.companyId]); if (!r.rowCount) return res.status(404).json({ error: 'No encontrado' }); res.status(204).end(); });
+app.post('/classify', auth, async (req: AuthRequest, res) => { const p = desc.safeParse(req.body); if (!p.success) return res.status(400).json({ error: 'Descripción inválida' }); const result = await classify(p.data.description); await pool.query('INSERT INTO risk_evaluation_logs(company_id,tool_id,description,risk_level,provider) VALUES($1,$2,$3,$4,$5)', [req.user!.companyId, p.data.toolId || null, p.data.description, result.riskLevel, result.provider]); res.json({ riskLevel: result.riskLevel }); });
+if (require.main === module) app.listen(Number(process.env.PORT) || 4000, () => console.log('API listening'));
